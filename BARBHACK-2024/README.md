@@ -18,6 +18,7 @@ Obviously do not cheat by looking at the passwords and flags in the recipe files
 
 - [BarbHack CTF 2024 : Gotham City - Active Directory writeup](https://www.acceis.fr/write-up-barbhack-challenge-active-directory/) by [KlemouLeZoZo](https://kleman.pw/seigneur.html)
 - [BarbHack CTF 2024 : Gotham City - Active Directory writeup](https://0xpix3l.github.io/CTFs/GothamCity/) by [0xPix3l](https://x.com/zzziadmo)
+- [BarbHack CTF 2024 : Gotham City - Active Directory writeup](https://secretmyth.blog/netexec/nxc-barbhack24-gotham//) by [thesecretmyth](https://x.com/thesecretmyth)
 
 There is 13 flags to find in this lab !
 
