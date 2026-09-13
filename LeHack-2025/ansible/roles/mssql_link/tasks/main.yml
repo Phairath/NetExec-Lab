@@ -1,8 +1,8 @@
 - name: Create SQL Linked server and enable RPC
   win_shell: |
-    SqlCmd -E -Q "EXEC master.dbo.sp_addlinkedserver @server = N'{{item.key}}', @srvproduct=N'', @provider=N'SQLOLEDB', @datasrc=N'{{item.value.data_src}}'"
-    SqlCmd -E -Q "EXEC master.dbo.sp_serveroption @server=N'{{item.key}}', @optname=N'rpc', @optvalue=N'true'"
-    SqlCmd -E -Q "EXEC master.dbo.sp_serveroption @server=N'{{item.key}}', @optname=N'rpc out', @optvalue=N'true'"
+    SqlCmd {{ connection_type }} -b -Q "IF NOT EXISTS (SELECT 1 FROM sys.servers WHERE name = N'{{item.key}}') EXEC master.dbo.sp_addlinkedserver @server = N'{{item.key}}', @srvproduct=N'', @provider=N'SQLOLEDB', @datasrc=N'{{item.value.data_src}}';"
+    SqlCmd {{ connection_type }} -b -Q "EXEC master.dbo.sp_serveroption @server=N'{{item.key}}', @optname=N'rpc', @optvalue=N'true';"
+    SqlCmd {{ connection_type }} -b -Q "EXEC master.dbo.sp_serveroption @server=N'{{item.key}}', @optname=N'rpc out', @optvalue=N'true';"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"
@@ -29,7 +29,7 @@
 
 - name: default login impersonation
   win_shell: |
-    SqlCmd -E -Q "EXEC master.dbo.sp_addlinkedsrvlogin @rmtsrvname = N'{{item.key}}', @locallogin = NULL , @useself = N'True'"
+    SqlCmd {{ connection_type }} -b -Q "IF EXISTS (SELECT 1 FROM sys.linked_logins AS ll JOIN sys.servers AS s ON s.server_id = ll.server_id WHERE s.name = N'{{item.key}}' AND ll.local_principal_id = 0) EXEC master.dbo.sp_droplinkedsrvlogin @rmtsrvname = N'{{item.key}}', @locallogin = NULL; EXEC master.dbo.sp_addlinkedsrvlogin @rmtsrvname = N'{{item.key}}', @locallogin = NULL, @useself = N'True';"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"

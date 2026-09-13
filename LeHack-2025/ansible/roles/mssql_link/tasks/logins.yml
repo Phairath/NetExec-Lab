@@ -1,6 +1,6 @@
 - name: Create logins mapping to specific users
   win_shell: |
-    SqlCmd -E -Q "EXEC master.dbo.sp_addlinkedsrvlogin @rmtsrvname = N'{{linked_server}}', @locallogin = N'{{user_mapping.local_login}}', @useself = N'False', @rmtuser = N'{{user_mapping.remote_login}}', @rmtpassword = N'{{user_mapping.remote_password}}'"
+    SqlCmd {{ connection_type }} -b -Q "IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'{{user_mapping.local_login}}') BEGIN IF EXISTS (SELECT 1 FROM sys.linked_logins AS ll JOIN sys.servers AS s ON s.server_id = ll.server_id JOIN sys.server_principals AS p ON p.principal_id = ll.local_principal_id WHERE s.name = N'{{linked_server}}' AND p.name = N'{{user_mapping.local_login}}') EXEC master.dbo.sp_droplinkedsrvlogin @rmtsrvname = N'{{linked_server}}', @locallogin = N'{{user_mapping.local_login}}'; EXEC master.dbo.sp_addlinkedsrvlogin @rmtsrvname = N'{{linked_server}}', @locallogin = N'{{user_mapping.local_login}}', @useself = N'False', @rmtuser = N'{{user_mapping.remote_login}}', @rmtpassword = N'{{user_mapping.remote_password}}'; END;"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"

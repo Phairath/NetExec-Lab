@@ -162,8 +162,8 @@
 
 - name: Add MSSQL admin
   win_shell: |
-    SqlCmd {{connection_type}} -Q "CREATE LOGIN [{{item}}] FROM WINDOWS"
-    SqlCmd {{connection_type}} -Q "SP_ADDSRVROLEMEMBER '{{item}}','SYSADMIN'"
+    SqlCmd {{connection_type}} -b -Q "IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'{{item}}') CREATE LOGIN [{{item}}] FROM WINDOWS;"
+    SqlCmd {{connection_type}} -b -Q "IF IS_SRVROLEMEMBER(N'sysadmin', N'{{item}}') <> 1 ALTER SERVER ROLE [sysadmin] ADD MEMBER [{{item}}];"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"
@@ -173,8 +173,8 @@
 
 - name: Add IMPERSONATE on login
   win_shell: |
-    SqlCmd {{connection_type}} -Q "CREATE LOGIN [{{item.key}}] FROM WINDOWS"
-    SqlCmd {{connection_type}} -Q "GRANT IMPERSONATE ON LOGIN::[{{item.value}}] TO [{{item.key}}]"
+    SqlCmd {{connection_type}} -b -Q "IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'{{item.key}}') CREATE LOGIN [{{item.key}}] FROM WINDOWS;"
+    SqlCmd {{connection_type}} -b -Q "GRANT IMPERSONATE ON LOGIN::[{{item.value}}] TO [{{item.key}}];"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"
@@ -184,9 +184,9 @@
 
 - name: Add IMPERSONATE on user
   win_shell: |
-    SqlCmd {{connection_type}} -Q "CREATE LOGIN [{{item.key}}] FROM WINDOWS"
-    SqlCmd {{connection_type}} -Q "USE {{item.value.db}};CREATE USER [{{item.value.user}}] FOR LOGIN [{{item.value.user}}]"
-    SqlCmd {{connection_type}} -Q "USE {{item.value.db}};GRANT IMPERSONATE ON USER::[{{item.value.impersonate}}] TO [{{item.value.user}}]"
+    SqlCmd {{connection_type}} -b -Q "IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'{{item.key}}') CREATE LOGIN [{{item.key}}] FROM WINDOWS;"
+    SqlCmd {{connection_type}} -b -Q "USE [{{item.value.db}}]; IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'{{item.value.user}}') CREATE USER [{{item.value.user}}] FOR LOGIN [{{item.value.user}}];"
+    SqlCmd {{connection_type}} -b -Q "USE [{{item.value.db}}]; GRANT IMPERSONATE ON USER::[{{item.value.impersonate}}] TO [{{item.value.user}}];"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"
@@ -196,8 +196,8 @@
 
 - name: Enable sa account
   win_shell: |
-    SqlCmd {{connection_type}} -Q "ALTER LOGIN sa ENABLE"
-    SqlCmd {{connection_type}} -Q "ALTER LOGIN sa WITH PASSWORD = '{{sa_password}}' , CHECK_POLICY=OFF"
+    SqlCmd {{connection_type}} -b -Q "ALTER LOGIN [sa] ENABLE;"
+    SqlCmd {{connection_type}} -b -Q "ALTER LOGIN [sa] WITH PASSWORD = '{{sa_password}}', CHECK_POLICY = OFF;"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"
@@ -206,7 +206,7 @@
 
 - name: enable MSSQL authentication and windows authent
   win_shell: |
-    SqlCmd {{connection_type}} -Q "EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2"
+    SqlCmd {{connection_type}} -b -Q "EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2;"
   become: yes
   become_method: runas
   become_user: "{{SQLSVCACCOUNT}}"
