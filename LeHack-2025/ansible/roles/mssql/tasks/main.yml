@@ -14,6 +14,11 @@
   set_fact:
     mssql_media_type: "{{ mssql_media_type_2022 if sql_version == 'MSSQL_2022' else mssql_media_type_2019 }}"
 
+- name: Set complete SQL Server media source
+  set_fact:
+    mssql_full_media_url: "{{ mssql_full_media_url_2022 if sql_version == 'MSSQL_2022' else mssql_full_media_url_2019 }}"
+    mssql_full_media_filename: "{{ mssql_full_media_filename_2022 if sql_version == 'MSSQL_2022' else mssql_full_media_filename_2019 }}"
+
 - name: Set mssql_service_instance
   set_fact:
     mssql_service_instance: "MSSQL${{ sql_instance_name }}"
@@ -65,7 +70,9 @@
   win_get_url:
       url: "{{download_url}}"
       dest: 'c:\setup\mssql\sql_installer.exe'
-  when: not installer_file.stat.exists
+  when:
+    - not installer_file.stat.exists
+    - mssql_full_media_url | length == 0
 
 - name: Add service account to Log on as a service
   win_user_right:
@@ -141,7 +148,19 @@
   when:
     - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
 
-- name: download complete SQL Server installation media with a bounded timeout
+- name: download complete SQL Server media directly from Microsoft
+  ansible.windows.win_get_url:
+    url: "{{ mssql_full_media_url }}"
+    dest: "C:\\setup\\mssql\\download\\{{ mssql_full_media_filename }}"
+    force: false
+    url_timeout: "{{ mssql_media_download_timeout_seconds }}"
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+    - mssql_media_packages.matched | default(0) == 0
+    - mssql_full_media_url | length > 0
+
+- name: download complete SQL Server media through the SSEI fallback
   ansible.windows.win_powershell:
     script: |
       $arguments = @(
@@ -179,6 +198,7 @@
     - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
     - not mssql_setup_executable.stat.exists
     - mssql_media_packages.matched | default(0) == 0
+    - mssql_full_media_url | length == 0
 
 - name: find downloaded full SQL Server media after download
   ansible.windows.win_find:
