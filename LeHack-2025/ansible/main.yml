@@ -36,11 +36,9 @@
 ## MSSQL + IIS  ----------
 # configure servers vulns (done in the middle of ad install to let time before install relations and acl)
 - import_playbook: servers.yml
-#- import_playbook: msqlsrv02.yml
-- import_playbook: msqlsrv01.yml
 - import_playbook: msqlsrv02.yml
+- import_playbook: msqlsrv01.yml
 - import_playbook: security.yml
-#msqlsrv02.yml
 ## AD - servers localgroup + rdp + inter domain relations & acl
 # set the rights and the group domains relations
 - import_playbook: cert.yml
