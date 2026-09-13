@@ -29,16 +29,25 @@ function defend_gotham {
     echo "[+] Defense round: $DEFENSE_ROUND"
     let "DEFENSE_ROUND += 1"
 
-    # Begin the mission with a 30-minute timeout unless it's a critical operation
+    # SQL Server and SSMS installers legitimately take longer than the default
+    # mission timeout. Killing Ansible while they are active leaves detached
+    # installers on the Windows hosts and makes the automatic retry collide with
+    # the first attempt.
+    MISSION_TIMEOUT="30m"
+    if [[ "$1" == "servers.yml" ]]; then
+        MISSION_TIMEOUT="3h"
+    fi
+
+    # Begin the mission with a bounded timeout unless it's a critical operation
     if [[ BARBHACK == "SCCM" ]]; then
         echo "$BATMAN_VICTORY Deploying without restrictions: $ANSIBLE_COMMAND $1"
         $ANSIBLE_COMMAND $1
     else
-        echo "$BATMAN_VICTORY Engaging Imperial forces with a 30-minute mission limit: $ANSIBLE_COMMAND $1"
-        timeout 30m $ANSIBLE_COMMAND $1
+        echo "$BATMAN_VICTORY Engaging Imperial forces with a $MISSION_TIMEOUT mission limit: $ANSIBLE_COMMAND $1"
+        timeout --foreground "$MISSION_TIMEOUT" $ANSIBLE_COMMAND $1
     fi
 
-    mission_status=$(echo $?)
+    mission_status=$?
 
     if [ $mission_status -eq 4 ]; then
         echo "$JOKER_ATTACK Imperial jammers disrupted communications! Retrying: $ANSIBLE_COMMAND $1"
@@ -80,11 +89,9 @@ case BARBHACK in
         defend_gotham ad-gmsa.yml
         #defend_gotham laps.yml
         defend_gotham servers.yml
-        #defend_gotham msqlsrv02.yml
-        defend_gotham msqlsrv01.yml
         defend_gotham msqlsrv02.yml
+        defend_gotham msqlsrv01.yml
         defend_gotham security.yml
-        #msqlsrv02.yml
         defend_gotham cert.yml
         defend_gotham adcs.yml
         defend_gotham cert.yml
