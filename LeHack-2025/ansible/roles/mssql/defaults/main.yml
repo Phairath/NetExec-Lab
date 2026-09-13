@@ -11,8 +11,15 @@ download_url_2019: https://download.microsoft.com/download/7/f/8/7f8a9c43-8c8a-4
 # SQL2022-SSEI-Eval.exe
 download_url_2022: https://go.microsoft.com/fwlink/?linkid=2215202&clcid=0x409&culture=en-us&country=us
 
-# The SSEI files above are web bootstrappers. Download the complete media first,
-# then run setup.exe so that ConfigurationFile.ini is handled by SQL Setup.
+# SQL Server 2019 Express Advanced full media (827,958,496 bytes). Downloading
+# this directly avoids the SSEI bootstrapper hanging in a non-interactive session.
+mssql_full_media_url_2019: https://download.microsoft.com/download/7/c/1/7c14e92e-bdcb-4f89-b7cf-93543e7112d1/SQLEXPRADV_x64_ENU.exe
+mssql_full_media_filename_2019: SQLEXPRADV_x64_ENU.exe
+
+# SQL Server 2022 Evaluation media is still obtained through its bootstrapper.
+mssql_full_media_url_2022: ""
+mssql_full_media_filename_2022: SQLServer2022-x64-ENU.exe
+
 mssql_media_type_2019: Advanced
 mssql_media_type_2022: CAB
 mssql_media_download_timeout_seconds: 1800
