@@ -71,6 +71,22 @@
       - "1.1.1.1"
       - "9.9.9.9"
 
+- name: Configure the domain controller to use its own DNS service
+  ansible.windows.win_dns_client:
+    adapter_names: "{{ domain_adapter }}"
+    dns_servers:
+      - "{{ hostvars[dict_key].ansible_host }}"
+  register: domain_controller_dns_client
+
+- name: Refresh DNS registration after configuring the local resolver
+  ansible.windows.win_powershell:
+    script: |
+      Clear-DnsClientCache
+      Register-DnsClient
+      Restart-Service -Name Netlogon -Force
+      $Ansible.Changed = $true
+  when: domain_controller_dns_client.changed
+
 #- name: install nuget
 #  win_shell: install-packageprovider -name nuget -force
 
