@@ -10,6 +10,10 @@
   set_fact:
     connection_type: "{{ connection_type_2022 if sql_version == 'MSSQL_2022' else connection_type_2019}}"
 
+- name: Set SQL Server media type
+  set_fact:
+    mssql_media_type: "{{ mssql_media_type_2022 if sql_version == 'MSSQL_2022' else mssql_media_type_2019 }}"
+
 - name: Set mssql_service_instance
   set_fact:
     mssql_service_instance: "MSSQL${{ sql_instance_name }}"
@@ -40,6 +44,11 @@
 - name: create a directory for media extraction
   win_file: 
     path: c:\setup\mssql\media
+    state: directory
+
+- name: create a directory for full media download
+  win_file:
+    path: c:\setup\mssql\download
     state: directory
 
 - name: create the configuration file
@@ -85,23 +94,230 @@
 
 - debug: msg="{{mssql_install_already_done}}"
 
-# Install the database with a domain admin user
-- name: Install the database
-  win_command: c:\setup\mssql\sql_installer.exe /configurationfile=c:\setup\mssql\sql_conf.ini /IACCEPTSQLSERVERLICENSETERMS /MEDIAPATH=c:\setup\mssql\media /QUIET /HIDEPROGRESSBAR
-  args:
-    chdir: c:\setup
-  vars:
-    ansible_become: yes
-    ansible_become_method: runas
-    ansible_become_user: "{{domain_admin}}"
-    ansible_become_password: "{{domain_admin_password}}"
-    ansible_become_flags: logon_type=new_credentials logon_flags=netcredentials_only
-  register: mssqlinstall
-  until: "mssqlinstall is not failed"
-  retries: 3
-  delay: 120
+- name: check whether extracted SQL Server media already exists
+  ansible.windows.win_stat:
+    path: C:\setup\mssql\media\setup.exe
+  register: mssql_setup_executable
+
+- name: find previously downloaded full SQL Server media
+  ansible.windows.win_find:
+    paths: C:\setup\mssql\download
+    patterns:
+      - SQLEXPR*_x64_ENU.exe
+      - SQLServer*x64*ENU*.exe
+    recurse: true
+    file_type: file
+  register: mssql_media_packages
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+
+- name: stop early when an old SQL bootstrapper is still running
+  ansible.windows.win_powershell:
+    script: |
+      $names = @(
+          'sql_installer.exe',
+          'SQL2019-SSEI-Expr.exe',
+          'SQL2022-SSEI-Eval.exe',
+          'SQLEXPRADV_x64_ENU.exe',
+          'SQLEXPR_x64_ENU.exe'
+      )
+      $running = Get-CimInstance -ClassName Win32_Process |
+          Where-Object {
+              $_.Name -in $names -or
+              ($_.Name -ieq 'setup.exe' -and $_.ExecutablePath -like 'C:\setup\mssql\media\*')
+          } |
+          Select-Object Name, ProcessId, CreationDate, ExecutablePath, CommandLine
+
+      $Ansible.Changed = $false
+      $Ansible.Result = $running
+      if ($running) {
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = 'A previous SQL installer is still running. Reboot the host or stop the stale installer before retrying.'
+              processes = $running
+          }
+      }
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+
+- name: download complete SQL Server installation media with a bounded timeout
+  ansible.windows.win_powershell:
+    script: |
+      $arguments = @(
+          '/ACTION=Download',
+          '/MEDIATYPE={{ mssql_media_type }}',
+          '/MEDIAPATH=C:\setup\mssql\download',
+          '/QUIET'
+      )
+      $process = Start-Process -FilePath 'C:\setup\mssql\sql_installer.exe' `
+          -ArgumentList $arguments -PassThru
+      $completed = $process.WaitForExit({{ mssql_media_download_timeout_seconds }} * 1000)
+
+      if (-not $completed) {
+          & taskkill.exe /PID $process.Id /T /F | Out-Null
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = 'Timed out downloading complete SQL Server media after {{ mssql_media_download_timeout_seconds }} seconds.'
+          }
+          return
+      }
+
+      $Ansible.Changed = $true
+      $Ansible.Result = @{ exit_code = $process.ExitCode }
+      if ($process.ExitCode -ne 0) {
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = "SQL Server media bootstrapper exited with code $($process.ExitCode)."
+              exit_code = $process.ExitCode
+          }
+      }
+  become: yes
+  become_method: runas
+  become_user: SYSTEM
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+    - mssql_media_packages.matched | default(0) == 0
+
+- name: find downloaded full SQL Server media after download
+  ansible.windows.win_find:
+    paths: C:\setup\mssql\download
+    patterns:
+      - SQLEXPR*_x64_ENU.exe
+      - SQLServer*x64*ENU*.exe
+    recurse: true
+    file_type: file
+  register: mssql_media_packages_after_download
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+
+- name: choose the complete SQL Server media package
+  ansible.builtin.set_fact:
+    mssql_media_package_path: >-
+      {{ (mssql_media_packages_after_download.files | default(mssql_media_packages.files) | first).path }}
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+    - (mssql_media_packages_after_download.matched | default(mssql_media_packages.matched | default(0))) > 0
+
+- name: fail when the bootstrapper did not produce complete SQL Server media
+  ansible.builtin.fail:
+    msg: >-
+      The SQL Server bootstrapper completed but no full media executable was
+      found under C:\setup\mssql\download.
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+    - (mssql_media_packages_after_download.matched | default(mssql_media_packages.matched | default(0))) == 0
+
+- name: extract complete SQL Server media with a bounded timeout
+  ansible.windows.win_powershell:
+    script: |
+      $arguments = @('/Q', '/X:C:\setup\mssql\media')
+      $process = Start-Process -FilePath '{{ mssql_media_package_path }}' `
+          -ArgumentList $arguments -PassThru
+      $completed = $process.WaitForExit({{ mssql_media_extract_timeout_seconds }} * 1000)
+
+      if (-not $completed) {
+          & taskkill.exe /PID $process.Id /T /F | Out-Null
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = 'Timed out extracting SQL Server media after {{ mssql_media_extract_timeout_seconds }} seconds.'
+          }
+          return
+      }
+
+      $Ansible.Changed = $true
+      $Ansible.Result = @{ exit_code = $process.ExitCode }
+      if ($process.ExitCode -ne 0) {
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = "SQL Server media extraction exited with code $($process.ExitCode)."
+              exit_code = $process.ExitCode
+          }
+      }
+  become: yes
+  become_method: runas
+  become_user: SYSTEM
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_executable.stat.exists
+    - mssql_media_package_path is defined
+
+- name: verify extracted SQL Server setup exists
+  ansible.windows.win_stat:
+    path: C:\setup\mssql\media\setup.exe
+  register: mssql_setup_after_extract
   when: mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
-#  when: not mssql_install_already_done.stat.exists
+
+- name: fail when full SQL Server media extraction did not produce setup.exe
+  ansible.builtin.fail:
+    msg: Complete SQL Server media extraction did not produce C:\setup\mssql\media\setup.exe.
+  when:
+    - mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
+    - not mssql_setup_after_extract.stat.exists
+
+- name: install SQL Server from full media with a bounded timeout
+  ansible.windows.win_powershell:
+    script: |
+      $stdoutPath = 'C:\setup\mssql\setup-stdout.log'
+      $stderrPath = 'C:\setup\mssql\setup-stderr.log'
+      $arguments = @(
+          '/ConfigurationFile=C:\setup\mssql\sql_conf.ini',
+          '/Q',
+          '/IACCEPTSQLSERVERLICENSETERMS',
+          '/INDICATEPROGRESS'
+      )
+      $process = Start-Process -FilePath 'C:\setup\mssql\media\setup.exe' `
+          -ArgumentList $arguments -RedirectStandardOutput $stdoutPath `
+          -RedirectStandardError $stderrPath -PassThru
+      $completed = $process.WaitForExit({{ mssql_install_timeout_seconds }} * 1000)
+
+      if (-not $completed) {
+          & taskkill.exe /PID $process.Id /T /F | Out-Null
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = 'SQL Server setup timed out after {{ mssql_install_timeout_seconds }} seconds.'
+              stdout_log = $stdoutPath
+              stderr_log = $stderrPath
+          }
+          return
+      }
+
+      $logVersion = '{{ "160" if sql_version == "MSSQL_2022" else "150" }}'
+      $logRoot = "C:\Program Files\Microsoft SQL Server\$logVersion\Setup Bootstrap\Log"
+      $summary = Get-ChildItem -LiteralPath $logRoot -Filter Summary.txt `
+          -Recurse -ErrorAction SilentlyContinue |
+          Sort-Object LastWriteTime -Descending |
+          Select-Object -First 1
+      $summaryText = if ($summary) { Get-Content -LiteralPath $summary.FullName -Raw } else { $null }
+
+      $Ansible.Changed = $true
+      $Ansible.Result = @{
+          exit_code = $process.ExitCode
+          summary_log = if ($summary) { $summary.FullName } else { $null }
+          summary = $summaryText
+          stdout_log = $stdoutPath
+          stderr_log = $stderrPath
+      }
+      if ($process.ExitCode -notin @(0, 3010)) {
+          $Ansible.Failed = $true
+          $Ansible.Result = @{
+              message = "SQL Server setup exited with code $($process.ExitCode)."
+              exit_code = $process.ExitCode
+              summary_log = if ($summary) { $summary.FullName } else { $null }
+              summary = $summaryText
+              stdout_log = $stdoutPath
+              stderr_log = $stderrPath
+          }
+      }
+  become: yes
+  become_method: runas
+  become_user: SYSTEM
+  register: mssqlinstall
+  when: mssql_install_already_done.state is not defined or mssql_install_already_done.name is not defined
 
 # sql server 2022
 - name: Add or update registry for ip port
@@ -123,7 +339,10 @@
 
 - name: Reboot
   win_reboot:
-  when: win_reg.changed
+  when: >-
+    win_reg.changed or
+    (mssqlinstall.result is defined and
+    (mssqlinstall.result.exit_code | int) == 3010)
 
 - name: Firewall | Allow MSSQL through Firewall
   win_dsc:
